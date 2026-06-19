@@ -32,7 +32,7 @@ Duolingo-style experience that's genuinely fun to stick with.
 | Layer     | Technology                                              |
 | --------- | ------------------------------------------------------- |
 | Front end | HTML, CSS (custom design system), vanilla JS (ES modules) |
-| Back end  | Node.js + Express                                       |
+| Back end  | Node.js — built-in `http` server (zero third-party dependencies) |
 | Database  | SQLite via Node's built-in `node:sqlite` module (real SQL, no native build step) |
 
 ## Requirements
@@ -41,13 +41,18 @@ Duolingo-style experience that's genuinely fun to stick with.
 
 ## Quick start
 
+COMBAT has **zero third-party dependencies**, so there's no install step.
+Run this single command in your terminal:
+
 ```bash
-npm install
 npm start
-# open http://localhost:3000
 ```
 
-Set a custom port with `PORT=8080 npm start`.
+Then open the local host in your browser:
+
+### ➜ http://localhost:3000
+
+Use a different port with `PORT=8080 npm start`.
 
 ## Project structure
 

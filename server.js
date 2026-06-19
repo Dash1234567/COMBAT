@@ -1,15 +1,74 @@
 'use strict';
 
+// COMBAT server — uses only Node.js built-ins (no third-party dependencies),
+// so it starts with a single `npm start` and no install step.
+
+const http = require('node:http');
+const fs = require('node:fs');
 const path = require('node:path');
-const express = require('express');
 const db = require('./lib/db');
 const { generatePlan } = require('./lib/planGenerator');
 
-const app = express();
 const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
+};
+
+// ------------------------------------------------------------------- helpers
+function sendJson(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(body);
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => {
+      data += chunk;
+      if (data.length > 1e6) { req.destroy(); reject(new Error('Body too large.')); }
+    });
+    req.on('end', () => {
+      if (!data) return resolve({});
+      try { resolve(JSON.parse(data)); } catch { reject(new SyntaxError('Invalid JSON.')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+function serveStatic(req, res, pathname) {
+  let rel = decodeURIComponent(pathname);
+  if (rel.endsWith('/')) rel += 'index.html';
+  const filePath = path.join(PUBLIC_DIR, rel);
+
+  // Block path traversal outside the public directory.
+  if (path.relative(PUBLIC_DIR, filePath).startsWith('..')) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    return res.end('Forbidden');
+  }
+
+  fs.readFile(filePath, (err, buf) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end('<h1>404 — Not Found</h1><p><a href="/">Back to COMBAT</a></p>');
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.end(req.method === 'HEAD' ? undefined : buf);
+  });
+}
 
 // ------------------------------------------------------------------ validation
 const DISCIPLINES = ['boxing', 'mma', 'bjj', 'muay_thai', 'wrestling', 'kickboxing', 'karate'];
@@ -51,7 +110,7 @@ function validatePlanInput(body) {
   if (body.event_date) {
     const d = new Date(body.event_date);
     if (Number.isNaN(d.getTime())) errors.push('Event date is invalid.');
-    else eventDate = body.event_date.slice(0, 10);
+    else eventDate = String(body.event_date).slice(0, 10);
   }
 
   return {
@@ -105,22 +164,15 @@ function progressFor(planId) {
   return { total, done, percent: total ? Math.round((done / total) * 100) : 0 };
 }
 
-// --------------------------------------------------------------------- routes
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
-
-// List all plans (most recent first) with progress for the dashboard.
-app.get('/api/plans', (_req, res) => {
+// ------------------------------------------------------------- API handlers
+function listPlans(res) {
   const plans = db.prepare('SELECT * FROM plans ORDER BY created_at DESC, id DESC').all();
-  res.json(
-    plans.map((p) => ({ ...p, progress: progressFor(p.id), weight: weightAnalysis(p) }))
-  );
-});
+  sendJson(res, 200, plans.map((p) => ({ ...p, progress: progressFor(p.id), weight: weightAnalysis(p) })));
+}
 
-// Create a plan and generate its weekly schedule.
-app.post('/api/plans', (req, res) => {
-  const { errors, value } = validatePlanInput(req.body || {});
-  if (errors.length) return res.status(400).json({ errors });
-
+function createPlan(res, body) {
+  const { errors, value } = validatePlanInput(body || {});
+  if (errors.length) return sendJson(res, 400, { errors });
   try {
     const { lastInsertRowid } = db
       .prepare(
@@ -133,20 +185,18 @@ app.post('/api/plans', (req, res) => {
         value.name, value.athlete_name, value.discipline, value.goal, value.experience,
         value.days_per_week, value.current_weight, value.target_weight, value.weight_unit, value.event_date
       );
-
     const planId = Number(lastInsertRowid);
     generatePlan(db, planId, value);
-    res.status(201).json({ id: planId });
+    sendJson(res, 201, { id: planId });
   } catch (err) {
     console.error('Failed to create plan:', err);
-    res.status(500).json({ errors: ['Could not create plan. Please try again.'] });
+    sendJson(res, 500, { errors: ['Could not create plan. Please try again.'] });
   }
-});
+}
 
-// Full plan detail: plan + sessions + exercises + computed metrics.
-app.get('/api/plans/:id', (req, res) => {
-  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(Number(req.params.id));
-  if (!plan) return res.status(404).json({ errors: ['Plan not found.'] });
+function getPlan(res, id) {
+  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(id);
+  if (!plan) return sendJson(res, 404, { errors: ['Plan not found.'] });
 
   const sessions = db
     .prepare('SELECT * FROM sessions WHERE plan_id = ? ORDER BY day_index').all(plan.id)
@@ -158,14 +208,13 @@ app.get('/api/plans/:id', (req, res) => {
         .all(s.id),
     }));
 
-  res.json({ ...plan, sessions, progress: progressFor(plan.id), weight: weightAnalysis(plan) });
-});
+  sendJson(res, 200, { ...plan, sessions, progress: progressFor(plan.id), weight: weightAnalysis(plan) });
+}
 
-// Toggle a session's completion, updating XP and streak on the parent plan.
-app.post('/api/sessions/:id/toggle', (req, res) => {
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(Number(req.params.id));
-  if (!session) return res.status(404).json({ errors: ['Session not found.'] });
-  if (session.focus === 'Rest') return res.status(400).json({ errors: ['Rest days cannot be completed.'] });
+function toggleSession(res, id) {
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id);
+  if (!session) return sendJson(res, 404, { errors: ['Session not found.'] });
+  if (session.focus === 'Rest') return sendJson(res, 400, { errors: ['Rest days cannot be completed.'] });
 
   const nowCompleted = session.completed ? 0 : 1;
   db.prepare('UPDATE sessions SET completed = ? WHERE id = ?').run(nowCompleted, session.id);
@@ -174,14 +223,11 @@ app.post('/api/sessions/:id/toggle', (req, res) => {
   const progress = progressFor(plan.id);
   const xp = progress.done * 20; // 20 XP per completed session
 
-  // Streak: bump when completing today, continuing from yesterday.
   let streak = plan.streak;
   let lastCompleted = plan.last_completed;
   if (nowCompleted) {
     const today = new Date().toISOString().slice(0, 10);
-    if (lastCompleted === today) {
-      // already trained today — streak unchanged
-    } else {
+    if (lastCompleted !== today) {
       const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
       streak = lastCompleted === yesterday ? streak + 1 : 1;
       lastCompleted = today;
@@ -191,18 +237,55 @@ app.post('/api/sessions/:id/toggle', (req, res) => {
   db.prepare('UPDATE plans SET xp = ?, streak = ?, last_completed = ? WHERE id = ?')
     .run(xp, streak, lastCompleted, plan.id);
 
-  res.json({ completed: !!nowCompleted, xp, streak, progress });
+  sendJson(res, 200, { completed: !!nowCompleted, xp, streak, progress });
+}
+
+function deletePlan(res, id) {
+  const info = db.prepare('DELETE FROM plans WHERE id = ?').run(id);
+  if (info.changes === 0) return sendJson(res, 404, { errors: ['Plan not found.'] });
+  sendJson(res, 200, { ok: true });
+}
+
+// --------------------------------------------------------------------- router
+async function handleApi(req, res, pathname, method) {
+  if (method === 'GET' && pathname === '/api/health') return sendJson(res, 200, { ok: true });
+  if (method === 'GET' && pathname === '/api/plans') return listPlans(res);
+  if (method === 'POST' && pathname === '/api/plans') {
+    let body;
+    try { body = await readJsonBody(req); }
+    catch { return sendJson(res, 400, { errors: ['Invalid request body.'] }); }
+    return createPlan(res, body);
+  }
+
+  let m;
+  if ((m = pathname.match(/^\/api\/plans\/(\d+)$/))) {
+    if (method === 'GET') return getPlan(res, Number(m[1]));
+    if (method === 'DELETE') return deletePlan(res, Number(m[1]));
+  }
+  if ((m = pathname.match(/^\/api\/sessions\/(\d+)\/toggle$/)) && method === 'POST') {
+    return toggleSession(res, Number(m[1]));
+  }
+  return sendJson(res, 404, { errors: ['Not found.'] });
+}
+
+const server = http.createServer((req, res) => {
+  const { pathname } = new URL(req.url, 'http://localhost');
+  const method = req.method;
+
+  if (pathname.startsWith('/api/')) {
+    handleApi(req, res, pathname, method).catch((err) => {
+      console.error(err);
+      if (!res.headersSent) sendJson(res, 500, { errors: ['Server error.'] });
+    });
+    return;
+  }
+
+  if (method === 'GET' || method === 'HEAD') return serveStatic(req, res, pathname);
+
+  res.writeHead(405, { 'Content-Type': 'text/plain' });
+  res.end('Method Not Allowed');
 });
 
-// Delete a plan (sessions + exercises cascade).
-app.delete('/api/plans/:id', (req, res) => {
-  const info = db.prepare('DELETE FROM plans WHERE id = ?').run(Number(req.params.id));
-  if (info.changes === 0) return res.status(404).json({ errors: ['Plan not found.'] });
-  res.json({ ok: true });
-});
-
-app.use('/api', (_req, res) => res.status(404).json({ errors: ['Not found.'] }));
-
-app.listen(PORT, () => {
-  console.log(`COMBAT running at http://localhost:${PORT}`);
+server.listen(PORT, () => {
+  console.log(`\n  🥊  COMBAT is running!\n  ➜  Open http://localhost:${PORT} in your browser\n`);
 });
