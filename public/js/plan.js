@@ -128,9 +128,9 @@ function render(p) {
     </div>
 
     <div class="stats">
-      <div class="stat"><div class="stat__num" id="statStreak" style="color:var(--orange-d)">${p.streak}</div><div class="stat__label">🔥 Day streak</div></div>
-      <div class="stat"><div class="stat__num" id="statXp" style="color:var(--blue-d)">${p.xp}</div><div class="stat__label">XP earned</div></div>
-      <div class="stat"><div class="stat__num" id="statProgress" style="color:var(--green-d)">${pr.percent}%</div><div class="stat__label">Complete</div></div>
+      <div class="stat"><div class="stat__num" id="statStreak" style="color:var(--orange)">${p.streak}</div><div class="stat__label">🔥 Day streak</div></div>
+      <div class="stat"><div class="stat__num" id="statXp" style="color:var(--blue)">${p.xp}</div><div class="stat__label">XP earned</div></div>
+      <div class="stat"><div class="stat__num" id="statProgress" style="color:var(--green)">${pr.percent}%</div><div class="stat__label">Complete</div></div>
       <div class="stat"><div class="stat__num" id="statSessions">${pr.done}/${pr.total}</div><div class="stat__label">Sessions</div></div>
     </div>
     <div class="bar" style="margin-top:16px"><div class="bar__fill" id="planBar" style="width:${pr.percent}%"></div></div>
