@@ -1,0 +1,26 @@
+{
+  "name": "combat",
+  "version": "1.0.0",
+  "description": "COMBAT — a Duolingo-style training planner for combat sports: conditioning, strength, dieting, and weight cutting.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --watch --experimental-sqlite --disable-warning=ExperimentalWarning server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "combat-sports",
+    "training",
+    "boxing",
+    "mma",
+    "weight-cut",
+    "conditioning"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.22.2"
+  }
+}

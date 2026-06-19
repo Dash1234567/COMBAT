@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Create a Plan · COMBAT</title>
+  <meta name="description" content="Build your personalized combat sports training plan in under a minute." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%23ff4b4b'/%3E%3Ctext x='50' y='54' font-size='60' font-family='Arial,sans-serif' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='central'%3EC%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header class="hotbar">
+    <div class="hotbar__inner">
+      <a class="brand" href="/" aria-label="COMBAT home">
+        <span class="brand__badge" aria-hidden="true">🥊</span>
+        <span class="brand__name">COMBAT</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <div class="nav__links">
+          <a class="navlink" href="/">Home</a>
+          <a class="navlink" href="/plans.html">My Plans</a>
+        </div>
+        <a class="btn btn--ghost btn--sm" href="/plans.html">My Plans</a>
+        <button class="nav__toggle" aria-label="Menu" aria-expanded="false">☰</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="wizard">
+      <div class="progress-top">
+        <a class="x" href="/" aria-label="Cancel">×</a>
+        <div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+      </div>
+
+      <form id="wizardForm" novalidate>
+        <!-- Step 0: name -->
+        <section class="step-screen active" data-step="0">
+          <h2>Name your plan</h2>
+          <p class="sub">Give this training block a name you'll recognise.</p>
+          <div class="field">
+            <label for="planName">Plan name</label>
+            <input class="input" id="planName" name="name" maxlength="60" placeholder="e.g. Summer Fight Camp" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="athleteName">Your name <span class="muted">(optional)</span></label>
+            <input class="input" id="athleteName" name="athlete_name" maxlength="60" placeholder="e.g. Alex" autocomplete="name" />
+          </div>
+        </section>
+
+        <!-- Step 1: discipline -->
+        <section class="step-screen" data-step="1">
+          <h2>What's your sport?</h2>
+          <p class="sub">We'll tailor skill work to your discipline.</p>
+          <div class="choices" id="disciplineChoices" role="radiogroup" aria-label="Discipline"></div>
+        </section>
+
+        <!-- Step 2: goal -->
+        <section class="step-screen" data-step="2">
+          <h2>What's your main goal?</h2>
+          <p class="sub">This shapes how your week is balanced.</p>
+          <div class="choices" id="goalChoices" role="radiogroup" aria-label="Goal"></div>
+        </section>
+
+        <!-- Step 3: experience -->
+        <section class="step-screen" data-step="3">
+          <h2>Your experience level?</h2>
+          <p class="sub">Beginners get fewer movements per session.</p>
+          <div class="choices" id="experienceChoices" role="radiogroup" aria-label="Experience"></div>
+        </section>
+
+        <!-- Step 4: days -->
+        <section class="step-screen" data-step="4">
+          <h2>How many days per week?</h2>
+          <p class="sub">Pick what you can realistically commit to.</p>
+          <div class="choices" id="daysChoices" role="radiogroup" aria-label="Training days"></div>
+        </section>
+
+        <!-- Step 5: weight -->
+        <section class="step-screen" data-step="5">
+          <h2>Weight goals <span class="muted">(optional)</span></h2>
+          <p class="sub">Add these to unlock weight-cut pacing and safety checks.</p>
+          <div class="field">
+            <label>Units</label>
+            <div class="unit-toggle" id="unitToggle">
+              <button type="button" data-unit="kg" class="active">kg</button>
+              <button type="button" data-unit="lb">lb</button>
+            </div>
+          </div>
+          <div class="input-row" style="margin-top:18px">
+            <div class="field">
+              <label for="currentWeight">Current weight</label>
+              <input class="input" id="currentWeight" name="current_weight" type="number" min="1" step="0.1" inputmode="decimal" placeholder="75" />
+            </div>
+            <div class="field">
+              <label for="targetWeight">Target weight</label>
+              <input class="input" id="targetWeight" name="target_weight" type="number" min="1" step="0.1" inputmode="decimal" placeholder="70" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="eventDate">Fight / weigh-in date <span class="muted">(optional)</span></label>
+            <input class="input" id="eventDate" name="event_date" type="date" />
+          </div>
+        </section>
+
+        <!-- Step 6: review -->
+        <section class="step-screen" data-step="6">
+          <h2>Review &amp; create</h2>
+          <p class="sub">Looks good? Build your plan.</p>
+          <div class="card" id="reviewCard" style="margin-top:20px"></div>
+        </section>
+
+        <p class="form-error" id="formError" role="alert"></p>
+
+        <div class="wizard__footer">
+          <button type="button" class="btn btn--ghost" id="backBtn" style="visibility:hidden">Back</button>
+          <button type="button" class="btn btn--green" id="nextBtn">Continue</button>
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <script type="module" src="/js/create.js"></script>
+</body>
+</html>
