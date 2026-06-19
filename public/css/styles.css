@@ -401,3 +401,48 @@ ul { margin: 0; padding: 0; list-style: none; }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+
+/* ===================================================================== AI COACH */
+.coach-head h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 900; letter-spacing: -1px; }
+.coach-sub { color: var(--muted); margin-top: 6px; }
+.coach-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
+.segmented { display: inline-flex; background: var(--bg-soft); border: 2px solid var(--line); border-radius: 14px; padding: 4px; gap: 4px; }
+.segmented button { border: none; background: transparent; color: var(--muted); font-weight: 800; padding: 9px 15px; border-radius: 10px; cursor: pointer; font-size: 14px; }
+.segmented button.active { background: var(--hl); color: #06212e; }
+
+.coach-learn { margin-top: 16px; display: grid; gap: 16px; }
+.who-group-label { font-weight: 900; font-size: 14px; margin-bottom: 10px; }
+.coach-panel { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.who { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.who b { display: block; font-size: 14px; }
+.who span { color: var(--muted); font-size: 12.5px; font-weight: 700; }
+
+.chat { margin-top: 22px; }
+.chat-log { display: flex; flex-direction: column; gap: 14px; min-height: 220px; }
+.msg { max-width: 82%; padding: 14px 16px; border-radius: 18px; line-height: 1.55; font-weight: 600; }
+.msg.user { align-self: flex-end; background: var(--hl-soft); border: 1px solid var(--hl); border-bottom-right-radius: 6px; }
+.msg.coach { align-self: flex-start; background: var(--surface); border: 2px solid var(--line); border-bottom-left-radius: 6px; }
+.msg.coach .coach-learn, .msg.coach .coach-panel { margin-top: 12px; }
+.coach-avatar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 900; font-size: 13px; color: var(--muted); }
+.coach-avatar .a { width: 26px; height: 26px; border-radius: 8px; background: var(--red); display: grid; place-items: center; font-size: 14px; box-shadow: 0 2px 0 var(--red-d); }
+.m-title { font-weight: 900; margin-bottom: 6px; font-size: 16px; color: var(--ink); }
+.m-sources { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); font-weight: 800; }
+.m-sources .src { background: var(--surface-2); border-radius: 999px; padding: 3px 10px; }
+.msg .who-group { margin-top: 10px; }
+
+.typing { display: flex; gap: 5px; align-items: center; width: max-content; }
+.typing span { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+.suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.suggestion { background: var(--surface); border: 2px solid var(--line); color: var(--ink); border-radius: 999px; padding: 9px 14px; font-weight: 800; font-size: 13px; cursor: pointer; transition: border-color 0.12s, color 0.12s; }
+.suggestion:hover { border-color: var(--hl); color: var(--hl); }
+
+.composer { position: sticky; bottom: 0; display: flex; gap: 10px; padding: 14px 0 10px; background: linear-gradient(to top, var(--bg) 72%, transparent); }
+.composer .input { flex: 1; }
+.composer .btn { flex: none; }
+.coach-disclaimer { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+
+@media (max-width: 560px) { .msg { max-width: 92%; } }

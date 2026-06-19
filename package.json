@@ -19,6 +19,5 @@
     "weight-cut",
     "conditioning"
   ],
-  "license": "MIT",
-  "dependencies": {}
+  "license": "MIT"
 }

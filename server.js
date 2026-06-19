@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const db = require('./lib/db');
 const { generatePlan } = require('./lib/planGenerator');
+const coach = require('./lib/coach');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -264,6 +265,12 @@ async function handleApi(req, res, pathname, method) {
   }
   if ((m = pathname.match(/^\/api\/sessions\/(\d+)\/toggle$/)) && method === 'POST') {
     return toggleSession(res, Number(m[1]));
+  }
+  if (method === 'POST' && pathname === '/api/coach') {
+    let body;
+    try { body = await readJsonBody(req); }
+    catch { return sendJson(res, 400, { errors: ['Invalid request body.'] }); }
+    return sendJson(res, 200, coach.respond({ message: body.message, sport: body.sport }));
   }
   return sendJson(res, 404, { errors: ['Not found.'] });
 }
