@@ -1,12 +1,34 @@
 -- COMBAT database schema (SQLite)
 -- A relational model linking athletes' plans -> weekly sessions -> exercises,
--- backed by a reusable exercise library.
+-- backed by a reusable exercise library, plus user accounts + sessions.
 
 PRAGMA foreign_keys = ON;
 
--- A training plan created by an athlete via the "Create Plan" flow.
+-- User accounts. Passwords are stored as a scrypt hash + per-user salt.
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT    NOT NULL UNIQUE,
+  password_hash TEXT    NOT NULL,
+  password_salt TEXT    NOT NULL,
+  nickname      TEXT,
+  avatar        TEXT,                          -- image data URL (optional)
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Login sessions: a random token maps to a user until it expires.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  token      TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+-- A training plan created via the "Create Plan" flow. user_id is NULL for
+-- plans created by a guest (not logged in).
 CREATE TABLE IF NOT EXISTS plans (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id        INTEGER,
   name           TEXT    NOT NULL,
   athlete_name   TEXT,
   discipline     TEXT    NOT NULL,          -- boxing | mma | bjj | muay_thai | wrestling | kickboxing | karate
@@ -39,7 +61,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   plan_id   INTEGER NOT NULL,
   day_index INTEGER NOT NULL,                 -- 0=Monday .. 6=Sunday
   day_label TEXT    NOT NULL,
-  focus     TEXT    NOT NULL,                 -- Strength | Conditioning | Skills & Technique | Sparring & Drills | Mobility & Recovery | Rest
+  focus     TEXT    NOT NULL,
   title     TEXT    NOT NULL,
   completed INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (plan_id) REFERENCES plans (id) ON DELETE CASCADE
@@ -55,6 +77,9 @@ CREATE TABLE IF NOT EXISTS session_exercises (
   FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
 );
 
+-- Note: idx_plans_user is created in lib/db.js after the user_id migration,
+-- so it also works on databases that predate the user_id column.
 CREATE INDEX IF NOT EXISTS idx_sessions_plan       ON sessions (plan_id);
 CREATE INDEX IF NOT EXISTS idx_session_ex_session  ON session_exercises (session_id);
 CREATE INDEX IF NOT EXISTS idx_exercises_category  ON exercises (category, discipline);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user  ON auth_sessions (user_id);

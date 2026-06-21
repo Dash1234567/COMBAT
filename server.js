@@ -9,9 +9,15 @@ const path = require('node:path');
 const db = require('./lib/db');
 const { generatePlan } = require('./lib/planGenerator');
 const coach = require('./lib/coach');
+const auth = require('./lib/auth');
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0'; // bind all interfaces so it's reachable via a shared link
 const PUBLIC_DIR = path.join(__dirname, 'public');
+
+const COOKIE_NAME = 'combat_session';
+const SESSION_DAYS = 30;
+const COOKIE_MAX_AGE = SESSION_DAYS * 24 * 60 * 60;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -28,9 +34,9 @@ const MIME = {
 };
 
 // ------------------------------------------------------------------- helpers
-function sendJson(res, status, obj) {
+function sendJson(res, status, obj, headers) {
   const body = JSON.stringify(obj);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...(headers || {}) });
   res.end(body);
 }
 
@@ -39,7 +45,7 @@ function readJsonBody(req) {
     let data = '';
     req.on('data', (chunk) => {
       data += chunk;
-      if (data.length > 1e6) { req.destroy(); reject(new Error('Body too large.')); }
+      if (data.length > 2_000_000) { req.destroy(); reject(new Error('Body too large.')); } // ~2MB (avatars)
     });
     req.on('end', () => {
       if (!data) return resolve({});
@@ -49,12 +55,16 @@ function readJsonBody(req) {
   });
 }
 
+async function getBody(req, res) {
+  try { return await readJsonBody(req); }
+  catch { sendJson(res, 400, { errors: ['Invalid request body.'] }); return null; }
+}
+
 function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
   if (rel.endsWith('/')) rel += 'index.html';
   const filePath = path.join(PUBLIC_DIR, rel);
 
-  // Block path traversal outside the public directory.
   if (path.relative(PUBLIC_DIR, filePath).startsWith('..')) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     return res.end('Forbidden');
@@ -71,7 +81,110 @@ function serveStatic(req, res, pathname) {
   });
 }
 
-// ------------------------------------------------------------------ validation
+// --------------------------------------------------------------------- auth
+function sessionCookie(token) {
+  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_MAX_AGE}`;
+}
+function clearCookie() {
+  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+}
+
+function currentUser(req) {
+  const token = auth.parseCookies(req.headers.cookie || '')[COOKIE_NAME];
+  if (!token) return null;
+  return db
+    .prepare(
+      `SELECT u.* FROM auth_sessions s JOIN users u ON u.id = s.user_id
+        WHERE s.token = ? AND s.expires_at > datetime('now')`
+    )
+    .get(token) || null;
+}
+
+function serializeUser(u) {
+  return { id: u.id, username: u.username, nickname: u.nickname || u.username, avatar: u.avatar || null, created_at: u.created_at };
+}
+
+function startSession(res, user, status) {
+  const token = auth.newToken();
+  db.prepare(`INSERT INTO auth_sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+${SESSION_DAYS} days'))`)
+    .run(token, user.id);
+  sendJson(res, status, { user: serializeUser(user) }, { 'Set-Cookie': sessionCookie(token) });
+}
+
+const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+const AVATAR_RE = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=\s]+$/;
+const MAX_AVATAR_CHARS = 900_000; // ~650KB image
+
+function cleanNickname(n) {
+  return String(n == null ? '' : n).trim().slice(0, 30);
+}
+
+function register(res, body) {
+  const username = String(body.username || '').trim();
+  const password = String(body.password || '');
+  const errors = [];
+  if (!USERNAME_RE.test(username)) errors.push('Username must be 3–20 letters, numbers or underscores.');
+  if (password.length < 6) errors.push('Password must be at least 6 characters.');
+  if (password.length > 200) errors.push('Password is too long.');
+  if (errors.length) return sendJson(res, 400, { errors });
+
+  const existing = db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username);
+  if (existing) return sendJson(res, 409, { errors: ['That username is already taken.'] });
+
+  const nickname = cleanNickname(body.nickname) || username;
+  const { salt, hash } = auth.hashPassword(password);
+  const { lastInsertRowid } = db
+    .prepare('INSERT INTO users (username, password_hash, password_salt, nickname) VALUES (?, ?, ?, ?)')
+    .run(username, hash, salt, nickname);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(lastInsertRowid));
+  startSession(res, user, 201);
+}
+
+function login(res, body) {
+  const username = String(body.username || '').trim();
+  const password = String(body.password || '');
+  const user = db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').get(username);
+  if (!user || !auth.verifyPassword(password, user.password_salt, user.password_hash)) {
+    return sendJson(res, 401, { errors: ['Incorrect username or password.'] });
+  }
+  startSession(res, user, 200);
+}
+
+function logout(res, req) {
+  const token = auth.parseCookies(req.headers.cookie || '')[COOKIE_NAME];
+  if (token) db.prepare('DELETE FROM auth_sessions WHERE token = ?').run(token);
+  sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearCookie() });
+}
+
+function updateProfile(res, user, body) {
+  if (!user) return sendJson(res, 401, { errors: ['Please log in.'] });
+  const fields = [];
+  const values = [];
+
+  if (body.nickname !== undefined) {
+    fields.push('nickname = ?');
+    values.push(cleanNickname(body.nickname) || user.username);
+  }
+  if ('avatar' in body) {
+    if (body.avatar === null || body.avatar === '') {
+      fields.push('avatar = ?');
+      values.push(null);
+    } else if (typeof body.avatar === 'string' && body.avatar.length <= MAX_AVATAR_CHARS && AVATAR_RE.test(body.avatar)) {
+      fields.push('avatar = ?');
+      values.push(body.avatar);
+    } else {
+      return sendJson(res, 400, { errors: ['Photo must be a PNG, JPG, WebP or GIF under ~650KB.'] });
+    }
+  }
+  if (!fields.length) return sendJson(res, 400, { errors: ['Nothing to update.'] });
+
+  values.push(user.id);
+  db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  sendJson(res, 200, { user: serializeUser(updated) });
+}
+
+// ------------------------------------------------------------- plan helpers
 const DISCIPLINES = ['boxing', 'mma', 'bjj', 'muay_thai', 'wrestling', 'kickboxing', 'karate'];
 const GOALS = ['conditioning', 'strength', 'dieting', 'weight_cutting'];
 const EXPERIENCE = ['beginner', 'intermediate', 'advanced'];
@@ -80,7 +193,7 @@ const UNITS = ['kg', 'lb'];
 function toNumberOrNull(value) {
   if (value === undefined || value === null || value === '') return null;
   const n = Number(value);
-  return Number.isFinite(n) ? n : NaN; // NaN signals an invalid (non-empty) value
+  return Number.isFinite(n) ? n : NaN;
 }
 
 function validatePlanInput(body) {
@@ -102,10 +215,8 @@ function validatePlanInput(body) {
 
   const current = toNumberOrNull(body.current_weight);
   const target = toNumberOrNull(body.target_weight);
-  if (Number.isNaN(current) || (current !== null && (current <= 0 || current > 600)))
-    errors.push('Current weight looks invalid.');
-  if (Number.isNaN(target) || (target !== null && (target <= 0 || target > 600)))
-    errors.push('Target weight looks invalid.');
+  if (Number.isNaN(current) || (current !== null && (current <= 0 || current > 600))) errors.push('Current weight looks invalid.');
+  if (Number.isNaN(target) || (target !== null && (target <= 0 || target > 600))) errors.push('Target weight looks invalid.');
 
   let eventDate = null;
   if (body.event_date) {
@@ -117,26 +228,17 @@ function validatePlanInput(body) {
   return {
     errors,
     value: {
-      name,
-      athlete_name: athlete || null,
-      discipline: body.discipline,
-      goal: body.goal,
-      experience: body.experience,
-      days_per_week: days,
-      current_weight: current,
-      target_weight: target,
-      weight_unit: unit,
-      event_date: eventDate,
+      name, athlete_name: athlete || null, discipline: body.discipline, goal: body.goal,
+      experience: body.experience, days_per_week: days, current_weight: current,
+      target_weight: target, weight_unit: unit, event_date: eventDate,
     },
   };
 }
 
-// Compute weight-cut pacing + safety from stored values.
 function weightAnalysis(plan) {
   if (plan.current_weight == null || plan.target_weight == null) return null;
   const toLose = Math.round((plan.current_weight - plan.target_weight) * 10) / 10;
   const result = { toLose, unit: plan.weight_unit, weeks: null, perWeek: null, safe: null, daysLeft: null };
-
   if (plan.event_date) {
     const days = Math.ceil((new Date(plan.event_date + 'T00:00:00') - Date.now()) / 86_400_000);
     result.daysLeft = days;
@@ -144,7 +246,7 @@ function weightAnalysis(plan) {
     result.weeks = Math.max(0, Math.round(weeks * 10) / 10);
     if (weeks > 0 && toLose > 0) {
       result.perWeek = Math.round((toLose / weeks) * 100) / 100;
-      const safeRate = plan.weight_unit === 'lb' ? 1.5 : 0.7; // sustainable weekly loss
+      const safeRate = plan.weight_unit === 'lb' ? 1.5 : 0.7;
       result.safe = result.perWeek <= safeRate;
     }
   }
@@ -154,10 +256,9 @@ function weightAnalysis(plan) {
 function progressFor(planId) {
   const row = db
     .prepare(
-      `SELECT
-         SUM(CASE WHEN focus <> 'Rest' THEN 1 ELSE 0 END) AS total,
-         SUM(CASE WHEN focus <> 'Rest' AND completed = 1 THEN 1 ELSE 0 END) AS done
-       FROM sessions WHERE plan_id = ?`
+      `SELECT SUM(CASE WHEN focus <> 'Rest' THEN 1 ELSE 0 END) AS total,
+              SUM(CASE WHEN focus <> 'Rest' AND completed = 1 THEN 1 ELSE 0 END) AS done
+         FROM sessions WHERE plan_id = ?`
     )
     .get(planId);
   const total = row.total || 0;
@@ -165,25 +266,32 @@ function progressFor(planId) {
   return { total, done, percent: total ? Math.round((done / total) * 100) : 0 };
 }
 
-// ------------------------------------------------------------- API handlers
-function listPlans(res) {
-  const plans = db.prepare('SELECT * FROM plans ORDER BY created_at DESC, id DESC').all();
+// A guest plan (user_id NULL) is public; an owned plan is private to its owner.
+function canAccessPlan(plan, userId) {
+  return plan.user_id == null || plan.user_id === userId;
+}
+
+// ------------------------------------------------------------- plan routes
+function listPlans(res, userId) {
+  const plans = userId
+    ? db.prepare('SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC, id DESC').all(userId)
+    : db.prepare('SELECT * FROM plans WHERE user_id IS NULL ORDER BY created_at DESC, id DESC').all();
   sendJson(res, 200, plans.map((p) => ({ ...p, progress: progressFor(p.id), weight: weightAnalysis(p) })));
 }
 
-function createPlan(res, body) {
+function createPlan(res, body, userId) {
   const { errors, value } = validatePlanInput(body || {});
   if (errors.length) return sendJson(res, 400, { errors });
   try {
     const { lastInsertRowid } = db
       .prepare(
         `INSERT INTO plans
-           (name, athlete_name, discipline, goal, experience, days_per_week,
+           (user_id, name, athlete_name, discipline, goal, experience, days_per_week,
             current_weight, target_weight, weight_unit, event_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
-        value.name, value.athlete_name, value.discipline, value.goal, value.experience,
+        userId, value.name, value.athlete_name, value.discipline, value.goal, value.experience,
         value.days_per_week, value.current_weight, value.target_weight, value.weight_unit, value.event_date
       );
     const planId = Number(lastInsertRowid);
@@ -195,34 +303,33 @@ function createPlan(res, body) {
   }
 }
 
-function getPlan(res, id) {
+function getPlan(res, id, userId) {
   const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(id);
-  if (!plan) return sendJson(res, 404, { errors: ['Plan not found.'] });
+  if (!plan || !canAccessPlan(plan, userId)) return sendJson(res, 404, { errors: ['Plan not found.'] });
 
   const sessions = db
     .prepare('SELECT * FROM sessions WHERE plan_id = ? ORDER BY day_index').all(plan.id)
     .map((s) => ({
       ...s,
       completed: !!s.completed,
-      exercises: db
-        .prepare('SELECT id, name, detail FROM session_exercises WHERE session_id = ? ORDER BY position')
-        .all(s.id),
+      exercises: db.prepare('SELECT id, name, detail FROM session_exercises WHERE session_id = ? ORDER BY position').all(s.id),
     }));
 
   sendJson(res, 200, { ...plan, sessions, progress: progressFor(plan.id), weight: weightAnalysis(plan) });
 }
 
-function toggleSession(res, id) {
+function toggleSession(res, id, userId) {
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id);
   if (!session) return sendJson(res, 404, { errors: ['Session not found.'] });
+  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(session.plan_id);
+  if (!plan || !canAccessPlan(plan, userId)) return sendJson(res, 404, { errors: ['Session not found.'] });
   if (session.focus === 'Rest') return sendJson(res, 400, { errors: ['Rest days cannot be completed.'] });
 
   const nowCompleted = session.completed ? 0 : 1;
   db.prepare('UPDATE sessions SET completed = ? WHERE id = ?').run(nowCompleted, session.id);
 
-  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(session.plan_id);
   const progress = progressFor(plan.id);
-  const xp = progress.done * 20; // 20 XP per completed session
+  const xp = progress.done * 20;
 
   let streak = plan.streak;
   let lastCompleted = plan.last_completed;
@@ -235,43 +342,45 @@ function toggleSession(res, id) {
     }
   }
 
-  db.prepare('UPDATE plans SET xp = ?, streak = ?, last_completed = ? WHERE id = ?')
-    .run(xp, streak, lastCompleted, plan.id);
-
+  db.prepare('UPDATE plans SET xp = ?, streak = ?, last_completed = ? WHERE id = ?').run(xp, streak, lastCompleted, plan.id);
   sendJson(res, 200, { completed: !!nowCompleted, xp, streak, progress });
 }
 
-function deletePlan(res, id) {
-  const info = db.prepare('DELETE FROM plans WHERE id = ?').run(id);
-  if (info.changes === 0) return sendJson(res, 404, { errors: ['Plan not found.'] });
+function deletePlan(res, id, userId) {
+  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(id);
+  if (!plan || !canAccessPlan(plan, userId)) return sendJson(res, 404, { errors: ['Plan not found.'] });
+  db.prepare('DELETE FROM plans WHERE id = ?').run(id);
   sendJson(res, 200, { ok: true });
 }
 
 // --------------------------------------------------------------------- router
 async function handleApi(req, res, pathname, method) {
+  const user = currentUser(req);
+  const userId = user ? user.id : null;
+
   if (method === 'GET' && pathname === '/api/health') return sendJson(res, 200, { ok: true });
-  if (method === 'GET' && pathname === '/api/plans') return listPlans(res);
-  if (method === 'POST' && pathname === '/api/plans') {
-    let body;
-    try { body = await readJsonBody(req); }
-    catch { return sendJson(res, 400, { errors: ['Invalid request body.'] }); }
-    return createPlan(res, body);
-  }
+
+  // Accounts
+  if (pathname === '/api/auth/register' && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return register(res, b); }
+  if (pathname === '/api/auth/login' && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return login(res, b); }
+  if (pathname === '/api/auth/logout' && method === 'POST') return logout(res, req);
+  if (pathname === '/api/auth/me' && method === 'GET') return sendJson(res, 200, { user: user ? serializeUser(user) : null });
+  if (pathname === '/api/profile' && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return updateProfile(res, user, b); }
+
+  // Plans
+  if (method === 'GET' && pathname === '/api/plans') return listPlans(res, userId);
+  if (method === 'POST' && pathname === '/api/plans') { const b = await getBody(req, res); if (b === null) return; return createPlan(res, b, userId); }
 
   let m;
   if ((m = pathname.match(/^\/api\/plans\/(\d+)$/))) {
-    if (method === 'GET') return getPlan(res, Number(m[1]));
-    if (method === 'DELETE') return deletePlan(res, Number(m[1]));
+    if (method === 'GET') return getPlan(res, Number(m[1]), userId);
+    if (method === 'DELETE') return deletePlan(res, Number(m[1]), userId);
   }
-  if ((m = pathname.match(/^\/api\/sessions\/(\d+)\/toggle$/)) && method === 'POST') {
-    return toggleSession(res, Number(m[1]));
-  }
-  if (method === 'POST' && pathname === '/api/coach') {
-    let body;
-    try { body = await readJsonBody(req); }
-    catch { return sendJson(res, 400, { errors: ['Invalid request body.'] }); }
-    return sendJson(res, 200, coach.respond({ message: body.message, sport: body.sport }));
-  }
+  if ((m = pathname.match(/^\/api\/sessions\/(\d+)\/toggle$/)) && method === 'POST') return toggleSession(res, Number(m[1]), userId);
+
+  // Coach
+  if (method === 'POST' && pathname === '/api/coach') { const b = await getBody(req, res); if (b === null) return; return sendJson(res, 200, coach.respond({ message: b.message, sport: b.sport })); }
+
   return sendJson(res, 404, { errors: ['Not found.'] });
 }
 
@@ -293,6 +402,6 @@ const server = http.createServer((req, res) => {
   res.end('Method Not Allowed');
 });
 
-server.listen(PORT, () => {
-  console.log(`\n  🥊  COMBAT is running!\n  ➜  Open http://localhost:${PORT} in your browser\n`);
+server.listen(PORT, HOST, () => {
+  console.log(`\n  🥊  COMBAT is running!\n  ➜  Local:   http://localhost:${PORT}\n  ➜  Network: http://<your-host>:${PORT}  (share this when the port is public)\n`);
 });

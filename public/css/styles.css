@@ -446,3 +446,36 @@ ul { margin: 0; padding: 0; list-style: none; }
 .coach-disclaimer { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 4px; }
 
 @media (max-width: 560px) { .msg { max-width: 92%; } }
+
+/* ============================================================= AUTH + PROFILE */
+.auth-card { width: min(440px, 92vw); margin: clamp(20px, 5vw, 48px) auto; }
+.auth-card h1 { font-size: clamp(24px, 4vw, 30px); font-weight: 900; letter-spacing: -0.5px; }
+.auth-card .sub { color: var(--muted); margin-top: 6px; }
+.auth-card form { margin-top: 18px; }
+.auth-card .btn--block { margin-top: 8px; }
+.auth-note { text-align: center; color: var(--muted); margin-top: 16px; font-size: 14px; font-weight: 700; }
+.auth-note a { color: var(--hl); font-weight: 800; cursor: pointer; text-decoration: none; }
+.auth-note a:hover { text-decoration: underline; }
+
+.avatar {
+  border-radius: 50%; object-fit: cover; display: inline-grid; place-items: center;
+  background: var(--surface-2); border: 2px solid var(--line); font-weight: 900; color: var(--ink);
+  flex: none; overflow: hidden;
+}
+.avatar--initial { background: var(--hl-soft); color: var(--hl); }
+
+.nav-acct {
+  display: flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 800;
+  color: var(--ink); padding: 4px 12px 4px 6px; border-radius: var(--r-pill); border: 2px solid var(--line);
+}
+.nav-acct:hover { background: var(--surface-2); }
+.nav-acct span { font-size: 14px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.profile-card { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.profile-id { flex: 1 1 240px; }
+.profile-id h1 { font-size: clamp(24px, 4vw, 32px); font-weight: 900; }
+.profile-meta { color: var(--muted); font-weight: 800; margin-top: 8px; }
+.profile-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.profile-edit { margin-top: 18px; }
+
+@media (max-width: 520px) { .nav-acct span { display: none; } }

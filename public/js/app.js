@@ -114,6 +114,42 @@ export function toast(message, type = '') {
   }, 2600);
 }
 
+// ------------------------------------------------------------------ account
+let _mePromise = null;
+export function getMe() {
+  if (!_mePromise) _mePromise = api('/api/auth/me').then((r) => r.user).catch(() => null);
+  return _mePromise;
+}
+
+export function avatarHtml(user, size = 40) {
+  const dim = `width:${size}px;height:${size}px`;
+  if (user && user.avatar) return `<img class="avatar" style="${dim}" src="${user.avatar}" alt="">`;
+  const initial = String((user && (user.nickname || user.username)) || '?').trim().charAt(0).toUpperCase() || '?';
+  return `<span class="avatar avatar--initial" style="${dim};font-size:${Math.round(size * 0.42)}px">${escapeHtml(initial)}</span>`;
+}
+
+async function initAccount() {
+  const nav = document.querySelector('.nav');
+  if (!nav) return;
+  const links = nav.querySelector('.nav__links');
+  const toggle = nav.querySelector('.nav__toggle');
+  let user = null;
+  try { user = await getMe(); } catch { /* offline */ }
+  if (user) {
+    const a = document.createElement('a');
+    a.className = 'nav-acct';
+    a.href = '/profile.html';
+    a.innerHTML = `${avatarHtml(user, 28)}<span>${escapeHtml(user.nickname)}</span>`;
+    if (toggle) nav.insertBefore(a, toggle); else nav.appendChild(a);
+  } else if (links) {
+    const a = document.createElement('a');
+    a.className = 'navlink';
+    a.href = '/login.html';
+    a.textContent = 'Log in';
+    links.appendChild(a);
+  }
+}
+
 // ---------------------------------------------------------- shared chrome
 function initChrome() {
   // Mobile nav toggle
@@ -139,6 +175,8 @@ function initChrome() {
   // Footer year
   const yr = document.querySelector('[data-year]');
   if (yr) yr.textContent = new Date().getFullYear();
+
+  initAccount();
 }
 
 if (document.readyState !== 'loading') initChrome();
