@@ -10,6 +10,7 @@ const db = require('./lib/db');
 const { generatePlan } = require('./lib/planGenerator');
 const coach = require('./lib/coach');
 const auth = require('./lib/auth');
+const { createLimiter } = require('./lib/rateLimit');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // bind all interfaces so it's reachable via a shared link
@@ -18,6 +19,11 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const COOKIE_NAME = 'combat_session';
 const SESSION_DAYS = 30;
 const COOKIE_MAX_AGE = SESSION_DAYS * 24 * 60 * 60;
+
+// Brute-force protection: block after repeated failed logins per IP+username,
+// and cap account creation per IP.
+const loginLimiter = createLimiter({ max: 5, windowMs: 15 * 60 * 1000, blockMs: 15 * 60 * 1000 });
+const registerLimiter = createLimiter({ max: 10, windowMs: 60 * 60 * 1000, blockMs: 60 * 60 * 1000 });
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -82,11 +88,24 @@ function serveStatic(req, res, pathname) {
 }
 
 // --------------------------------------------------------------------- auth
-function sessionCookie(token) {
-  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_MAX_AGE}`;
+// Mark cookies Secure when the request reached us over HTTPS (directly or via
+// a proxy such as Codespaces), while still working over plain HTTP locally.
+function isSecureRequest(req) {
+  if (req.socket && req.socket.encrypted) return true;
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  return proto === 'https';
 }
-function clearCookie() {
-  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+
+function clientIp(req) {
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xff || (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
+function sessionCookie(token, secure) {
+  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_MAX_AGE}${secure ? '; Secure' : ''}`;
+}
+function clearCookie(secure) {
+  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
 }
 
 function currentUser(req) {
@@ -104,11 +123,11 @@ function serializeUser(u) {
   return { id: u.id, username: u.username, nickname: u.nickname || u.username, avatar: u.avatar || null, created_at: u.created_at };
 }
 
-function startSession(res, user, status) {
+function startSession(res, user, status, secure) {
   const token = auth.newToken();
   db.prepare(`INSERT INTO auth_sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+${SESSION_DAYS} days'))`)
     .run(token, user.id);
-  sendJson(res, status, { user: serializeUser(user) }, { 'Set-Cookie': sessionCookie(token) });
+  sendJson(res, status, { user: serializeUser(user) }, { 'Set-Cookie': sessionCookie(token, secure) });
 }
 
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
@@ -119,7 +138,12 @@ function cleanNickname(n) {
   return String(n == null ? '' : n).trim().slice(0, 30);
 }
 
-function register(res, body) {
+function register(res, body, req, secure) {
+  const ip = clientIp(req);
+  const wait = registerLimiter.retryAfter(ip);
+  if (wait > 0) return sendJson(res, 429, { errors: ['Too many sign-up attempts. Please try again later.'] }, { 'Retry-After': String(wait) });
+  registerLimiter.strike(ip);
+
   const username = String(body.username || '').trim();
   const password = String(body.password || '');
   const errors = [];
@@ -137,23 +161,33 @@ function register(res, body) {
     .prepare('INSERT INTO users (username, password_hash, password_salt, nickname) VALUES (?, ?, ?, ?)')
     .run(username, hash, salt, nickname);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(lastInsertRowid));
-  startSession(res, user, 201);
+  startSession(res, user, 201, secure);
 }
 
-function login(res, body) {
+function login(res, body, req, secure) {
   const username = String(body.username || '').trim();
   const password = String(body.password || '');
+  const key = `${clientIp(req)}:${username.toLowerCase()}`;
+
+  const wait = loginLimiter.retryAfter(key);
+  if (wait > 0) {
+    const mins = Math.max(1, Math.ceil(wait / 60));
+    return sendJson(res, 429, { errors: [`Too many failed attempts. Try again in ${mins} minute${mins > 1 ? 's' : ''}.`] }, { 'Retry-After': String(wait) });
+  }
+
   const user = db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').get(username);
   if (!user || !auth.verifyPassword(password, user.password_salt, user.password_hash)) {
+    loginLimiter.strike(key);
     return sendJson(res, 401, { errors: ['Incorrect username or password.'] });
   }
-  startSession(res, user, 200);
+  loginLimiter.reset(key);
+  startSession(res, user, 200, secure);
 }
 
-function logout(res, req) {
+function logout(res, req, secure) {
   const token = auth.parseCookies(req.headers.cookie || '')[COOKIE_NAME];
   if (token) db.prepare('DELETE FROM auth_sessions WHERE token = ?').run(token);
-  sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearCookie() });
+  sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearCookie(secure) });
 }
 
 function updateProfile(res, user, body) {
@@ -357,13 +391,14 @@ function deletePlan(res, id, userId) {
 async function handleApi(req, res, pathname, method) {
   const user = currentUser(req);
   const userId = user ? user.id : null;
+  const secure = isSecureRequest(req);
 
   if (method === 'GET' && pathname === '/api/health') return sendJson(res, 200, { ok: true });
 
   // Accounts
-  if (pathname === '/api/auth/register' && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return register(res, b); }
-  if (pathname === '/api/auth/login' && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return login(res, b); }
-  if (pathname === '/api/auth/logout' && method === 'POST') return logout(res, req);
+  if (pathname === '/api/auth/register' && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return register(res, b, req, secure); }
+  if (pathname === '/api/auth/login' && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return login(res, b, req, secure); }
+  if (pathname === '/api/auth/logout' && method === 'POST') return logout(res, req, secure);
   if (pathname === '/api/auth/me' && method === 'GET') return sendJson(res, 200, { user: user ? serializeUser(user) : null });
   if (pathname === '/api/profile' && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return updateProfile(res, user, b); }
 
