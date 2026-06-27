@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS plans (
   target_weight  REAL,
   weight_unit    TEXT    NOT NULL DEFAULT 'kg',
   event_date     TEXT,                       -- ISO date of fight / weigh-in (optional)
+  start_date     TEXT,                        -- ISO date the training block begins
   xp             INTEGER NOT NULL DEFAULT 0,
   streak         INTEGER NOT NULL DEFAULT 0,
   last_completed TEXT,                        -- ISO date of last completed session
@@ -63,7 +64,20 @@ CREATE TABLE IF NOT EXISTS sessions (
   day_label TEXT    NOT NULL,
   focus     TEXT    NOT NULL,
   title     TEXT    NOT NULL,
+  phase     TEXT    NOT NULL DEFAULT 'off_season', -- off_season | pre_season | fight_camp
   completed INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (plan_id) REFERENCES plans (id) ON DELETE CASCADE
+);
+
+-- Calendar: which date ranges of a plan fall in which training phase.
+CREATE TABLE IF NOT EXISTS plan_phases (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id    INTEGER NOT NULL,
+  phase      TEXT    NOT NULL,
+  week_start INTEGER NOT NULL,                 -- 0-based week index within the plan
+  weeks      INTEGER NOT NULL,
+  start_date TEXT    NOT NULL,                 -- Monday of the first week (ISO)
+  end_date   TEXT    NOT NULL,                 -- Sunday of the last week (ISO)
   FOREIGN KEY (plan_id) REFERENCES plans (id) ON DELETE CASCADE
 );
 
@@ -81,5 +95,6 @@ CREATE TABLE IF NOT EXISTS session_exercises (
 -- so it also works on databases that predate the user_id column.
 CREATE INDEX IF NOT EXISTS idx_sessions_plan       ON sessions (plan_id);
 CREATE INDEX IF NOT EXISTS idx_session_ex_session  ON session_exercises (session_id);
+CREATE INDEX IF NOT EXISTS idx_plan_phases_plan     ON plan_phases (plan_id);
 CREATE INDEX IF NOT EXISTS idx_exercises_category  ON exercises (category, discipline);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user  ON auth_sessions (user_id);

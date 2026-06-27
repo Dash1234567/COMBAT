@@ -479,3 +479,38 @@ ul { margin: 0; padding: 0; list-style: none; }
 .profile-edit { margin-top: 18px; }
 
 @media (max-width: 520px) { .nav-acct span { display: none; } }
+
+/* ========================================================== CALENDAR + PHASES */
+.timeline { display: flex; gap: 8px; margin-top: 8px; }
+.timeline__block {
+  flex: 1; min-width: 0; border: 2px solid var(--line); border-top: 5px solid var(--c, var(--blue));
+  border-radius: 14px; padding: 12px 14px; background: color-mix(in srgb, var(--c, var(--blue)) 12%, var(--surface));
+}
+.timeline__block.is-current { box-shadow: 0 0 0 2px var(--c, var(--blue)); }
+.timeline__label { font-weight: 900; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.timeline__meta { color: var(--muted); font-weight: 800; font-size: 12px; margin-top: 4px; }
+
+.today-card {
+  margin-top: 14px; border: 2px solid var(--line); border-left: 6px solid var(--c, var(--blue));
+  border-radius: 16px; padding: 16px 18px; background: var(--surface);
+}
+.today-card__date { color: var(--muted); font-weight: 800; font-size: 13px; }
+.today-card__phase { font-weight: 900; font-size: 18px; margin-top: 2px; }
+.today-card__session { margin-top: 6px; font-weight: 800; }
+
+.phase-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.phase-tab {
+  border: 2px solid var(--line); background: var(--surface); color: var(--muted); font-weight: 800;
+  padding: 9px 16px; border-radius: var(--r-pill); cursor: pointer;
+}
+.phase-tab.active { border-color: var(--c, var(--blue)); color: var(--ink); background: color-mix(in srgb, var(--c, var(--blue)) 16%, var(--surface)); }
+
+.phase-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0; }
+.phase-info__card { border: 2px solid var(--line); border-radius: 16px; padding: 14px 16px; background: var(--surface); }
+.phase-info__card h4 { font-size: 14px; font-weight: 900; }
+.phase-info__card p { color: var(--muted); font-weight: 700; margin-top: 6px; font-size: 14px; }
+
+@media (max-width: 560px) {
+  .timeline { flex-direction: column; }
+  .timeline__block { flex: auto; }
+}

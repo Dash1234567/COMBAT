@@ -15,6 +15,7 @@ const state = {
   current_weight: '',
   target_weight: '',
   event_date: '',
+  start_date: '',
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -73,8 +74,12 @@ $('#unitToggle').addEventListener('click', (e) => {
   $('#unitToggle').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
 });
 
-// Default the event date min to today.
-$('#eventDate').min = new Date().toISOString().slice(0, 10);
+// Default the start date to today; the event can't be before it.
+const today = new Date().toISOString().slice(0, 10);
+$('#startDate').value = today;
+$('#startDate').min = today;
+$('#eventDate').min = today;
+$('#startDate').addEventListener('change', () => { $('#eventDate').min = $('#startDate').value || today; });
 
 // ----------------------------------------------------------------- navigation
 function clearError() { formError.textContent = ''; }
@@ -98,6 +103,7 @@ function readInputs() {
   state.current_weight = $('#currentWeight').value.trim();
   state.target_weight = $('#targetWeight').value.trim();
   state.event_date = $('#eventDate').value;
+  state.start_date = $('#startDate').value;
 }
 
 function validateStep(i) {
@@ -122,6 +128,7 @@ function validateStep(i) {
       const c = state.current_weight, t = state.target_weight;
       if ((c && !t) || (!c && t)) return 'Enter both weights, or leave both blank.';
       if (c && t && Number(t) > Number(c)) return 'For a cut, target weight should be below current weight.';
+      if (state.start_date && state.event_date && state.event_date < state.start_date) return 'Event date must be after the start date.';
       break;
     }
   }
@@ -145,6 +152,7 @@ function renderReview() {
     ['Experience', `${x.emoji} ${escapeHtml(x.label)}`],
     ['Days / week', `${state.days_per_week}`],
     ['Weight', weightLine],
+    ['Start date', state.start_date ? escapeHtml(state.start_date) : '<span class="muted">today</span>'],
     ['Event date', state.event_date ? escapeHtml(state.event_date) : '<span class="muted">—</span>'],
   ];
   $('#reviewCard').innerHTML = rows
@@ -167,6 +175,7 @@ async function submit() {
       current_weight: state.current_weight === '' ? null : Number(state.current_weight),
       target_weight: state.target_weight === '' ? null : Number(state.target_weight),
       event_date: state.event_date || null,
+      start_date: state.start_date || null,
     };
     const { id } = await api('/api/plans', { method: 'POST', body: JSON.stringify(payload) });
     toast('Plan created! 🥊', 'success');

@@ -7,7 +7,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const db = require('./lib/db');
-const { generatePlan } = require('./lib/planGenerator');
+const { generatePlan, periodize, locateDate, PHASE_META, PHASE_ORDER } = require('./lib/planGenerator');
 const coach = require('./lib/coach');
 const auth = require('./lib/auth');
 const { createLimiter } = require('./lib/rateLimit');
@@ -259,12 +259,20 @@ function validatePlanInput(body) {
     else eventDate = String(body.event_date).slice(0, 10);
   }
 
+  let startDate = new Date().toISOString().slice(0, 10);
+  if (body.start_date) {
+    const d = new Date(body.start_date);
+    if (Number.isNaN(d.getTime())) errors.push('Start date is invalid.');
+    else startDate = String(body.start_date).slice(0, 10);
+  }
+  if (eventDate && eventDate < startDate) errors.push('Event date must be after the start date.');
+
   return {
     errors,
     value: {
       name, athlete_name: athlete || null, discipline: body.discipline, goal: body.goal,
       experience: body.experience, days_per_week: days, current_weight: current,
-      target_weight: target, weight_unit: unit, event_date: eventDate,
+      target_weight: target, weight_unit: unit, event_date: eventDate, start_date: startDate,
     },
   };
 }
@@ -321,12 +329,13 @@ function createPlan(res, body, userId) {
       .prepare(
         `INSERT INTO plans
            (user_id, name, athlete_name, discipline, goal, experience, days_per_week,
-            current_weight, target_weight, weight_unit, event_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            current_weight, target_weight, weight_unit, event_date, start_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         userId, value.name, value.athlete_name, value.discipline, value.goal, value.experience,
-        value.days_per_week, value.current_weight, value.target_weight, value.weight_unit, value.event_date
+        value.days_per_week, value.current_weight, value.target_weight, value.weight_unit,
+        value.event_date, value.start_date
       );
     const planId = Number(lastInsertRowid);
     generatePlan(db, planId, value);
@@ -342,14 +351,42 @@ function getPlan(res, id, userId) {
   if (!plan || !canAccessPlan(plan, userId)) return sendJson(res, 404, { errors: ['Plan not found.'] });
 
   const sessions = db
-    .prepare('SELECT * FROM sessions WHERE plan_id = ? ORDER BY day_index').all(plan.id)
+    .prepare('SELECT * FROM sessions WHERE plan_id = ? ORDER BY phase, day_index').all(plan.id)
     .map((s) => ({
       ...s,
       completed: !!s.completed,
       exercises: db.prepare('SELECT id, name, detail FROM session_exercises WHERE session_id = ? ORDER BY position').all(s.id),
     }));
 
-  sendJson(res, 200, { ...plan, sessions, progress: progressFor(plan.id), weight: weightAnalysis(plan) });
+  // Calendar: phase date ranges. Fall back to a single off-season block for
+  // plans created before periodization existed.
+  let segments = db.prepare('SELECT phase, week_start, weeks, start_date, end_date FROM plan_phases WHERE plan_id = ? ORDER BY week_start').all(plan.id);
+  if (!segments.length) segments = periodize(plan.start_date, null).segments;
+
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  const timeline = {
+    week_start: first.start_date,
+    week_end: last.end_date,
+    total_weeks: segments.reduce((a, s) => a + s.weeks, 0),
+    segments,
+  };
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const today = locateDate(timeline, todayISO);
+  if (today) {
+    const s = sessions.find((x) => x.phase === today.phase && x.day_index === today.day_index);
+    today.session = s ? { title: s.title, focus: s.focus, day_label: s.day_label } : null;
+  }
+
+  const fallbackMeta = (p) => ({ phase: p, label: p, emoji: '•', color: 'blue', training: '', recovery: '', nutrition: '' });
+  const phases = segments.map((s) => ({
+    ...(PHASE_META[s.phase] || fallbackMeta(s.phase)),
+    week_start: s.week_start, weeks: s.weeks, start_date: s.start_date, end_date: s.end_date,
+    is_current: today ? today.phase === s.phase : false,
+  }));
+
+  sendJson(res, 200, { ...plan, sessions, phases, timeline, today, progress: progressFor(plan.id), weight: weightAnalysis(plan) });
 }
 
 function toggleSession(res, id, userId) {
