@@ -91,6 +91,19 @@ CREATE TABLE IF NOT EXISTS session_exercises (
   FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
 );
 
+-- Competitions/events the athlete adds on the calendar. The soonest upcoming
+-- event drives the plan's periodization.
+CREATE TABLE IF NOT EXISTS events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id    INTEGER NOT NULL,
+  date       TEXT    NOT NULL,                 -- ISO date
+  time       TEXT,                              -- HH:MM (optional)
+  type       TEXT    NOT NULL,                  -- dual | tournament | states | ...
+  title      TEXT,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (plan_id) REFERENCES plans (id) ON DELETE CASCADE
+);
+
 -- Note: idx_plans_user is created in lib/db.js after the user_id migration,
 -- so it also works on databases that predate the user_id column.
 CREATE INDEX IF NOT EXISTS idx_sessions_plan       ON sessions (plan_id);
@@ -98,3 +111,4 @@ CREATE INDEX IF NOT EXISTS idx_session_ex_session  ON session_exercises (session
 CREATE INDEX IF NOT EXISTS idx_plan_phases_plan     ON plan_phases (plan_id);
 CREATE INDEX IF NOT EXISTS idx_exercises_category  ON exercises (category, discipline);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user  ON auth_sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_events_plan          ON events (plan_id);

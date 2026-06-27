@@ -386,7 +386,9 @@ function getPlan(res, id, userId) {
     is_current: today ? today.phase === s.phase : false,
   }));
 
-  sendJson(res, 200, { ...plan, sessions, phases, timeline, today, progress: progressFor(plan.id), weight: weightAnalysis(plan) });
+  const events = db.prepare("SELECT id, date, time, type, title FROM events WHERE plan_id = ? ORDER BY date, COALESCE(time, '')").all(plan.id);
+
+  sendJson(res, 200, { ...plan, sessions, phases, timeline, today, events, progress: progressFor(plan.id), weight: weightAnalysis(plan) });
 }
 
 function toggleSession(res, id, userId) {
@@ -424,6 +426,64 @@ function deletePlan(res, id, userId) {
   sendJson(res, 200, { ok: true });
 }
 
+// ------------------------------------------------------------- events / calendar
+const EVENT_TYPES = ['dual', 'tournament', 'states', 'regionals', 'nationals', 'sparring', 'other'];
+
+function validateEvent(body) {
+  const errors = [];
+  const date = String(body.date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(date + 'T00:00:00Z').getTime())) errors.push('A valid date is required.');
+  const type = EVENT_TYPES.includes(body.type) ? body.type : null;
+  if (!type) errors.push('Pick a valid event type.');
+  let time = null;
+  if (body.time) {
+    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(body.time)) time = body.time;
+    else errors.push('Time must be in HH:MM format.');
+  }
+  const title = String(body.title || '').trim().slice(0, 60) || null;
+  return { errors, value: { date, type, time, title } };
+}
+
+// Rebuild a plan's periodized schedule (deletes the old one) targeting an event.
+function regeneratePlan(plan, eventDate) {
+  db.prepare('DELETE FROM plan_phases WHERE plan_id = ?').run(plan.id);
+  db.prepare('DELETE FROM sessions WHERE plan_id = ?').run(plan.id); // cascades exercises
+  db.prepare('UPDATE plans SET event_date = ?, xp = 0 WHERE id = ?').run(eventDate, plan.id);
+  generatePlan(db, plan.id, {
+    discipline: plan.discipline, goal: plan.goal, experience: plan.experience,
+    days_per_week: plan.days_per_week, start_date: plan.start_date, event_date: eventDate,
+  });
+}
+
+// Periodization targets the soonest upcoming event (or none if all are past).
+function syncSchedule(plan) {
+  const today = new Date().toISOString().slice(0, 10);
+  const next = db.prepare('SELECT date FROM events WHERE plan_id = ? AND date >= ? ORDER BY date ASC LIMIT 1').get(plan.id, today);
+  regeneratePlan(plan, next ? next.date : null);
+}
+
+function addEvent(res, planId, body, userId) {
+  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(planId);
+  if (!plan || !canAccessPlan(plan, userId)) return sendJson(res, 404, { errors: ['Plan not found.'] });
+  const { errors, value } = validateEvent(body || {});
+  if (errors.length) return sendJson(res, 400, { errors });
+  const { lastInsertRowid } = db
+    .prepare('INSERT INTO events (plan_id, date, time, type, title) VALUES (?, ?, ?, ?, ?)')
+    .run(planId, value.date, value.time, value.type, value.title);
+  try { syncSchedule(plan); } catch (err) { console.error('Failed to regenerate plan:', err); }
+  sendJson(res, 201, { id: Number(lastInsertRowid) });
+}
+
+function deleteEvent(res, eventId, userId) {
+  const ev = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+  if (!ev) return sendJson(res, 404, { errors: ['Event not found.'] });
+  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(ev.plan_id);
+  if (!plan || !canAccessPlan(plan, userId)) return sendJson(res, 404, { errors: ['Event not found.'] });
+  db.prepare('DELETE FROM events WHERE id = ?').run(eventId);
+  try { syncSchedule(plan); } catch (err) { console.error('Failed to regenerate plan:', err); }
+  sendJson(res, 200, { ok: true });
+}
+
 // --------------------------------------------------------------------- router
 async function handleApi(req, res, pathname, method) {
   const user = currentUser(req);
@@ -449,6 +509,10 @@ async function handleApi(req, res, pathname, method) {
     if (method === 'DELETE') return deletePlan(res, Number(m[1]), userId);
   }
   if ((m = pathname.match(/^\/api\/sessions\/(\d+)\/toggle$/)) && method === 'POST') return toggleSession(res, Number(m[1]), userId);
+
+  // Calendar events
+  if ((m = pathname.match(/^\/api\/plans\/(\d+)\/events$/)) && method === 'POST') { const b = await getBody(req, res); if (b === null) return; return addEvent(res, Number(m[1]), b, userId); }
+  if ((m = pathname.match(/^\/api\/events\/(\d+)$/)) && method === 'DELETE') return deleteEvent(res, Number(m[1]), userId);
 
   // Coach
   if (method === 'POST' && pathname === '/api/coach') { const b = await getBody(req, res); if (b === null) return; return sendJson(res, 200, coach.respond({ message: b.message, sport: b.sport })); }

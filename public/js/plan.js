@@ -145,7 +145,10 @@ function render() {
           </div>
         </div>
       </div>
-      <button class="btn btn--ghost btn--sm" data-action="delete">🗑️ Delete</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn btn--ghost btn--sm" href="/calendar.html?id=${p.id}">📅 Calendar</a>
+        <button class="btn btn--ghost btn--sm" data-action="delete">🗑️ Delete</button>
+      </div>
     </div>
 
     <div class="stats">

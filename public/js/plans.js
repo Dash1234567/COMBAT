@@ -8,7 +8,7 @@ function planCard(p) {
   const g = goalMeta(p.goal);
   const pct = p.progress.percent;
   return `
-    <a class="plan-card accent-${p.goal}" href="/plan.html?id=${p.id}">
+    <a class="plan-card accent-${p.goal}" href="/calendar.html?id=${p.id}">
       <div class="plan-card__top">
         <span class="plan-card__emoji" aria-hidden="true">${d.emoji}</span>
         <div>
