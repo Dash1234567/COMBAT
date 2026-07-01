@@ -56,7 +56,14 @@ body {
   line-height: 1.5;
   font-weight: 600;
   -webkit-font-smoothing: antialiased;
+  overflow-wrap: break-word;              /* long names/words never cause overflow */
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
 }
+/* Never allow a stray element to create horizontal scrolling on phones. */
+html, body { max-width: 100%; }
+img, svg, video { max-width: 100%; height: auto; }
+input, select, textarea, button { font-size: 16px; } /* prevents iOS zoom-on-focus */
 img { max-width: 100%; display: block; }
 a { color: inherit; }
 h1, h2, h3, h4 { margin: 0; line-height: 1.15; }
@@ -334,16 +341,17 @@ ul { margin: 0; padding: 0; list-style: none; }
 .tips li { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; }
 .tips li::before { content: "✔"; color: var(--green); font-weight: 900; }
 
-.week { display: grid; gap: 14px; margin-top: 8px; }
+.week { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 8px; }
 .day-card { background: var(--surface); border: 2px solid var(--line); border-radius: 18px; padding: 18px 20px; box-shadow: var(--shadow-card); }
 .day-card.done { border-color: var(--green); background: color-mix(in srgb, var(--green) 14%, var(--surface)); }
 .day-card.rest { background: var(--bg-soft); border-style: dashed; }
 .day-card__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.day-card__day { display: flex; align-items: center; gap: 10px; }
+.day-card__day { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
 .day-card__day .d { font-weight: 900; font-size: 18px; }
 .day-card__title { color: var(--muted); font-weight: 800; font-size: 14px; }
 .exlist { margin-top: 14px; display: grid; gap: 2px; }
 .ex { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px dashed var(--line); font-weight: 700; }
+.ex > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .ex:last-child { border-bottom: none; }
 .ex .detail { color: var(--muted); font-weight: 800; white-space: nowrap; }
 .rest-note { color: var(--muted); font-weight: 800; margin-top: 6px; }
@@ -523,13 +531,14 @@ ul { margin: 0; padding: 0; list-style: none; }
 .cal-legend__item { display: inline-flex; align-items: center; gap: 6px; }
 .cal-legend__dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 
-.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 6px; }
+.cal-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; }
 .cal-weekdays span { text-align: center; font-weight: 900; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
 .cal-cell {
-  position: relative; aspect-ratio: 1 / 1; border: 2px solid var(--line); border-radius: 14px; background: var(--surface);
+  position: relative; aspect-ratio: 1 / 1; min-height: 42px; border: 2px solid var(--line); border-radius: 14px; background: var(--surface);
   cursor: pointer; padding: 8px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
   font: inherit; color: var(--ink); transition: transform 0.05s, border-color 0.12s;
+  -webkit-tap-highlight-color: transparent;
 }
 .cal-cell:hover { border-color: var(--hl); }
 .cal-cell:active { transform: scale(0.97); }
@@ -548,7 +557,7 @@ ul { margin: 0; padding: 0; list-style: none; }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 200; display: grid; place-items: center; padding: 16px; }
 .modal-backdrop[hidden] { display: none; }
-.modal { width: min(520px, 96vw); max-height: 88vh; overflow: auto; background: var(--surface); border: 2px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); animation: pop 0.2s ease; }
+.modal { width: min(520px, 96vw); max-height: 88vh; max-height: 88dvh; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; background: var(--surface); border: 2px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); animation: pop 0.2s ease; }
 .modal__head { position: sticky; top: 0; background: var(--surface); display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px 12px; border-bottom: 2px solid var(--line); }
 .modal__date { font-weight: 900; font-size: 18px; }
 .modal__phase { font-weight: 800; color: var(--muted); margin-top: 2px; font-size: 14px; }
@@ -571,3 +580,27 @@ ul { margin: 0; padding: 0; list-style: none; }
 .agenda-item.rest { border-style: dashed; }
 .agenda-empty { color: var(--muted); font-weight: 800; padding: 8px 0; }
 .event-form .field { margin-top: 14px; }
+
+/* ============================================================ DEVICE SUPPORT */
+/* Very small phones: keep the hotbar on one row (logo mark stays on the left). */
+@media (max-width: 360px) {
+  .brand__name { display: none; }
+  .hotbar__inner { gap: 8px; }
+  .nav { gap: 4px; }
+  .nav .btn { padding: 8px 11px; font-size: 12px; }
+  .fc { white-space: normal; }
+}
+
+/* Segmented pickers (coach sport / auth mode) go full-width on small screens. */
+@media (max-width: 470px) {
+  .segmented { width: 100%; }
+  .segmented button { flex: 1; min-width: 0; padding: 9px 6px; font-size: 13px; }
+}
+
+/* Fallbacks for browsers without color-mix() (older Safari / Android): use a
+   solid tint so accent circles and phase surfaces still render. */
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .pillar__icon, .plan-head__emoji, .plan-card__emoji { background: var(--surface-2); }
+  .day-card.done, .cal-cell.has-phase, .timeline__block { background: var(--surface); }
+  .phase-tab.active { background: var(--surface-2); }
+}
