@@ -74,6 +74,10 @@ the port is exposed:
 - **Your own server / VM:** allow port 3000 (or set `PORT`) through the firewall
   and share `http://<your-host>:3000`. Put it behind HTTPS for production.
 
+For a **permanent public website** (a real host, custom domain, HTTPS and
+persistent data) there's a step-by-step guide with a ready-made `Dockerfile` in
+**[DEPLOY.md](DEPLOY.md)**.
+
 ## Project structure
 
 ```
